@@ -11,8 +11,12 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
-#include "SDL.h"
-#include "SDL_ttf.h"
+
+#include <android/log.h>
+
+#include <SDL.h>
+#include <SDL_ttf.h>        // truetype font extension library
+#include <SDL_mixer.h>      // sound library
 
 const Uint8* gCurrentKeyStates = nullptr;
 
@@ -20,6 +24,72 @@ const Uint8* gCurrentKeyStates = nullptr;
 SDL_Rect gScreenRect = { 0, 0, 800, 600 };
 SDL_Point gTouchLocation = { gScreenRect.w / 2, gScreenRect.h / 2 };
 bool gTouchTap = false;
+
+// AUDIO stuff, TODO - move into audio class
+//The music that will be played
+Mix_Music *gMusic = nullptr;
+
+//The sound effects that will be used
+Mix_Chunk *gHitPaddle = nullptr;
+Mix_Chunk *gHitBrick = nullptr;
+Mix_Chunk *gMissedPaddle = nullptr;
+
+/**
+* Log an SDL error with some error message to the output stream of our choice
+* @param os The output stream to write the message to
+* @param msg The error message to write, format will be msg error: SDL_GetError()
+*/
+void logSDLError( std::ostream &os, const std::string &msg )
+{
+    os << msg << " error: " << SDL_GetError() << std::endl;
+    SDL_Log("error: %s, %s\n", msg.c_str(), SDL_GetError());
+    __android_log_print(ANDROID_LOG_ERROR, "MOOSE", "%s", msg.c_str());
+}
+
+//
+// Load Audio
+//
+bool loadMedia()
+{
+    //Loading success flag
+    bool success = true;
+
+    //Load music
+    gMusic = Mix_LoadMUS( "skate_music.mp3" );
+    if( gMusic == NULL )
+    {
+        std::string msg = std::string("Failed to load music! SDL_mixer Error: ") + Mix_GetError();
+        logSDLError( std::cerr, msg);
+        success = false;
+    }
+
+    //Load sound effects
+    gHitPaddle = Mix_LoadWAV( "ping_pong_8bit_beeep.ogg" );
+    if( gHitPaddle == NULL )
+    {
+        std::string msg = std::string("Failed to load hitPaddle sound! SDL_mixer Error: ") + Mix_GetError();
+        logSDLError( std::cerr, msg);
+        success = false;
+    }
+
+    gHitBrick = Mix_LoadWAV( "ping_pong_8bit_plop.ogg" );
+    if( gHitBrick == NULL )
+    {
+        std::string msg = std::string("Failed to load hitBrick! SDL_mixer Error: ") + Mix_GetError();
+        logSDLError( std::cerr, msg);
+        success = false;
+    }
+
+    gMissedPaddle = Mix_LoadWAV( "ping_pong_8bit_peeeeeep.ogg" );
+    if( gMissedPaddle == NULL )
+    {
+        std::string msg = std::string("Failed to load missedPaddle! SDL_mixer Error: ") + Mix_GetError();
+        logSDLError( std::cerr, msg);
+        success = false;
+    }
+
+    return success;
+}
 
 /**
 * Draw an SDL_Texture to an SDL_Renderer at some destination rect
@@ -65,18 +135,6 @@ void renderTexture( SDL_Texture *tex, SDL_Renderer *ren, int x, int y, SDL_Rect 
     renderTexture( tex, ren, dst, clip );
 }
 
-
-/**
-* Log an SDL error with some error message to the output stream of our choice
-* @param os The output stream to write the message to
-* @param msg The error message to write, format will be msg error: SDL_GetError()
-*/
-void logSDLError( std::ostream &os, const std::string &msg )
-{
-    os << msg << " error: " << SDL_GetError() << std::endl;
-    SDL_Log("error: %s, %s\n", msg.c_str(), SDL_GetError());
-}
-
 /**
 * Render the message we want to display to a texture for drawing
 * @param message The message we want to display
@@ -95,13 +153,13 @@ SDL_Texture* createText( const std::string &message, TTF_Font *font,
     if (surf == nullptr)
     {
         TTF_CloseFont( font );
-        logSDLError( std::cout, "TTF_RenderText" );
+        logSDLError( std::cerr, "TTF_RenderText" );
         return nullptr;
     }
     SDL_Texture *texture = SDL_CreateTextureFromSurface( renderer, surf );
     if (texture == nullptr)
     {
-        logSDLError( std::cout, "CreateTexture" );
+        logSDLError( std::cerr, "CreateTexture" );
     }
     //Clean up the surface and font
     SDL_FreeSurface( surf );
@@ -311,6 +369,8 @@ private:
             // If the ball leaves the window towards the bottom,
             // we destroy it.
             destroyed = true;
+            if (gMissedPaddle != nullptr)
+                Mix_PlayChannel( -1, gMissedPaddle, 0 );
         }
     }
 };
@@ -411,21 +471,28 @@ bool isIntersecting( const T1& mA, const T2& mB ) noexcept
 
 void solvePaddleBallCollision( const Paddle& mPaddle, Ball& mBall ) noexcept
 {
-    if (!isIntersecting( mPaddle, mBall )) return;
+    if (!isIntersecting( mPaddle, mBall ))
+        return;
 
     mBall.velocity.y = -Ball::defVelocity;
     mBall.velocity.x =
             mBall.x < mPaddle.x ? -Ball::defVelocity : Ball::defVelocity;
+
+    if (gHitPaddle != nullptr)
+        Mix_PlayChannel( -1, gHitPaddle, 0 );
+
 }
 
 void solveBrickBallCollision( Brick& mBrick, Ball& mBall ) noexcept
 {
-    if (!isIntersecting( mBrick, mBall )) return;
+    if (!isIntersecting( mBrick, mBall ))
+        return;
 
     // Instead of immediately destroying the brick upon collision,
     // we decrease and check its required hits first.
     --mBrick.requiredHits;
-    if (mBrick.requiredHits <= 0) mBrick.destroyed = true;
+    if (mBrick.requiredHits <= 0)
+        mBrick.destroyed = true;
 
     float overlapLeft{ mBall.right() - mBrick.left() };
     float overlapRight{ mBrick.right() - mBall.left() };
@@ -443,6 +510,10 @@ void solveBrickBallCollision( Brick& mBrick, Ball& mBall ) noexcept
                 ballFromLeft ? -Ball::defVelocity : Ball::defVelocity;
     else
         mBall.velocity.y = ballFromTop ? -Ball::defVelocity : Ball::defVelocity;
+
+    if (gHitBrick != nullptr)
+        Mix_PlayChannel( -1, gHitBrick, 0 );
+
 }
 
 
@@ -486,19 +557,35 @@ public:
     // returns -1 on error
     int init()
     {
+        __android_log_print(ANDROID_LOG_INFO, "MOOSE", "%s", "GAME INIT BEGIN");
+
         // init SDL
         if (SDL_Init( SDL_INIT_EVERYTHING ) != 0)
         {
-            logSDLError( std::cout, "SDL_Init" );
+            logSDLError( std::cerr, "SDL_Init" );
             return -1;
         }
 
         // init TTF system
         if (TTF_Init() != 0)
         {
-            logSDLError( std::cout, "TTF_Init" );
+            logSDLError( std::cerr, "TTF_Init" );
             SDL_Quit();
             return -1;
+        }
+
+        // init audio system
+        //Initialize SDL_mixer
+        if( Mix_OpenAudio( 44100, MIX_DEFAULT_FORMAT, 2, 2048 ) < 0 )
+        {
+            std::string msg = std::string("SDL_mixer could not initialize! SDL_mixer Error") + Mix_GetError();
+            logSDLError( std::cerr, msg);
+            return -1;
+        }
+
+        if (loadMedia() == false)
+        {
+        //    return -1;
         }
 
         // Create window
@@ -506,7 +593,7 @@ public:
                                    gScreenRect.w, gScreenRect.h, SDL_WINDOW_FULLSCREEN );
         if (window == nullptr)
         {
-            logSDLError( std::cout, "CreateWindow" );
+            logSDLError( std::cerr, "CreateWindow" );
             SDL_Quit();
             return -1;
         }
@@ -516,7 +603,7 @@ public:
                                        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC );
         if (renderer == nullptr)
         {
-            logSDLError( std::cout, "CreateRenderer" );
+            logSDLError( std::cerr, "CreateRenderer" );
             SDL_DestroyWindow( window );
             SDL_Quit();
             return -1;
@@ -535,7 +622,7 @@ public:
         font35 = TTF_OpenFont( "calibri.ttf", 35 );
         if (font15 == nullptr || font35 == nullptr)
         {
-            logSDLError( std::cout, "TTF_OpenFont" );
+            logSDLError( std::cerr, "TTF_OpenFont" );
             return -1;
         }
 
@@ -550,6 +637,12 @@ public:
             SDL_Quit();
             return -1;
         }
+
+        //Play the music
+        Mix_PlayMusic( gMusic, -1 );
+
+
+        __android_log_print(ANDROID_LOG_INFO, "MOOSE", "%s", "GAME INIT END");
 
         return 0;	// ok
     }
@@ -653,9 +746,9 @@ public:
             {
                 std::string temp;
                 if (state == State::Paused)
-                    temp = "Paused";
+                    temp = "Paused - Tap to Resume";
                 else if (state == State::GameOver)
-                    temp = "Game over!";
+                    temp = "Game over! - Tap to Play Again";
                 else if (state == State::Victory)
                     temp = "You won!";
 
@@ -711,6 +804,12 @@ public:
                     textLives = createText(temp, font15, white, renderer);
                 }
                 renderTexture( textLives, renderer, 10, 10 );
+
+                // draw screen outline
+                SDL_SetRenderDrawColor( renderer, 0, 0, 255, 255 );
+                SDL_RenderDrawLine( renderer, 0,0, 0,gScreenRect.h);
+                SDL_RenderDrawLine( renderer, 0,0, gScreenRect.w-2,0);
+                SDL_RenderDrawLine( renderer, gScreenRect.w-2,0, gScreenRect.w-2,gScreenRect.h);
             }
 
             //Update the screen
@@ -719,6 +818,15 @@ public:
 
 
         // cleanup
+
+        //Free the sound effects
+        Mix_FreeChunk( gHitBrick );
+        Mix_FreeChunk( gHitPaddle );
+        Mix_FreeChunk( gMissedPaddle );
+
+        //Free the music
+        Mix_FreeMusic( gMusic );
+
         TTF_CloseFont( font15 );
         TTF_CloseFont( font35 );
         SDL_DestroyTexture( textState );
