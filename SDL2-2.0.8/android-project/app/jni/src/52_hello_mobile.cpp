@@ -111,7 +111,7 @@ bool LTexture::loadFromFile( std::string path )
 	//Get rid of preexisting texture
 	free();
 
-	//The final texture
+	//The final texture.bmp
 	SDL_Texture* newTexture = NULL;
 
 	//Load image at specified path
