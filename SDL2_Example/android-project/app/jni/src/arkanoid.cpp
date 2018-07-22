@@ -493,7 +493,8 @@ public:
         }
 
         // Create window
-        window = SDL_CreateWindow( "ARKANOID", 100, 100, wndWidth, wndHeight, SDL_WINDOW_SHOWN );
+        window = SDL_CreateWindow( "ARKANOID", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                                   wndWidth, wndHeight, SDL_WINDOW_FULLSCREEN );
         if (window == nullptr)
         {
             logSDLError( std::cout, "CreateWindow" );
@@ -518,6 +519,7 @@ public:
             SDL_Quit();
             return -1;
         }
+        SDL_RenderSetLogicalSize(renderer, wndWidth, wndHeight);
 
         //Open the font
         font15 = TTF_OpenFont( "calibri.ttf", 15 );
@@ -546,7 +548,7 @@ public:
     void restart()
     {
         // Let's remember to reset the remaining lives.
-        remainingLives = 3;
+        remainingLives = 10;
 
         state = State::InProgress;
         manager.clear();

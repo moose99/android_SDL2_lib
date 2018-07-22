@@ -41,7 +41,8 @@
          -->
      
         <activity android:name="SDLActivity"
-            android:label="@string/app_name"
+            android:label="Arkanoid"
+            android:screenOrientation="landscape"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
             >
             <intent-filter>
