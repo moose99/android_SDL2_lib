@@ -42,9 +42,10 @@
      
         <activity android:name="SDLActivity"
             android:label="Arkanoid"
-            android:screenOrientation="landscape"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
             >
+            <!--   android:screenOrientation="landscape" -->
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

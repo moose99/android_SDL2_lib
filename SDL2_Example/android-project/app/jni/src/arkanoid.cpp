@@ -16,6 +16,11 @@
 
 const Uint8* gCurrentKeyStates = nullptr;
 
+// global vars, TODO - move these into the game
+SDL_Rect gScreenRect = { 0, 0, 800, 600 };
+SDL_Point gTouchLocation = { gScreenRect.w / 2, gScreenRect.h / 2 };
+bool gTouchTap = false;
+
 /**
 * Draw an SDL_Texture to an SDL_Renderer at some destination rect
 * taking a clip of the texture if desired
@@ -129,7 +134,6 @@ void fill_circle( SDL_Renderer *renderer, int cx, int cy, int radius, Uint8 r, U
     }
 }
 
-constexpr unsigned int wndWidth{ 800 }, wndHeight{ 600 };
 
 class Entity
 {
@@ -269,7 +273,7 @@ class Ball : public Entity, public Circle
 {
 public:
     static const SDL_Color defColor;
-    static constexpr float defRadius{ 10.f }, defVelocity{ 6.f };
+    static constexpr float defRadius{ 10.f }, defVelocity{ 8.f };
 
     Vector2f velocity{ -defVelocity, -defVelocity };
 
@@ -297,12 +301,12 @@ private:
     {
         if (left() < 0)
             velocity.x = defVelocity;
-        else if (right() > wndWidth)
+        else if (right() > gScreenRect.w)
             velocity.x = -defVelocity;
 
         if (top() < 0)
             velocity.y = defVelocity;
-        else if (bottom() > wndHeight)
+        else if (bottom() > gScreenRect.h)
         {
             // If the ball leaves the window towards the bottom,
             // we destroy it.
@@ -344,12 +348,15 @@ public:
 private:
     void processPlayerInput()
     {
+#if 0
         if ((gCurrentKeyStates[SDL_SCANCODE_LEFT]) && left() > 0)
             velocity.x = -defVelocity;
-        else if ((gCurrentKeyStates[SDL_SCANCODE_RIGHT]) && right() < wndWidth)
+        else if ((gCurrentKeyStates[SDL_SCANCODE_RIGHT]) && right() < gScreenRect.w)
             velocity.x = defVelocity;
         else
             velocity.x = 0;
+#endif
+        x = gTouchLocation.x;
     }
 };
 
@@ -438,6 +445,7 @@ void solveBrickBallCollision( Brick& mBrick, Ball& mBall ) noexcept
         mBall.velocity.y = ballFromTop ? -Ball::defVelocity : Ball::defVelocity;
 }
 
+
 class Game
 {
 private:
@@ -470,6 +478,7 @@ private:
     int remainingLives{ 0 };
 
 public:
+
     Game()
     {
     }
@@ -494,7 +503,7 @@ public:
 
         // Create window
         window = SDL_CreateWindow( "ARKANOID", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                   wndWidth, wndHeight, SDL_WINDOW_FULLSCREEN );
+                                   gScreenRect.w, gScreenRect.h, SDL_WINDOW_FULLSCREEN );
         if (window == nullptr)
         {
             logSDLError( std::cout, "CreateWindow" );
@@ -519,7 +528,7 @@ public:
             SDL_Quit();
             return -1;
         }
-        SDL_RenderSetLogicalSize(renderer, wndWidth, wndHeight);
+        SDL_RenderSetLogicalSize(renderer, gScreenRect.w, gScreenRect.h);
 
         //Open the font
         font15 = TTF_OpenFont( "calibri.ttf", 15 );
@@ -548,9 +557,9 @@ public:
     void restart()
     {
         // Let's remember to reset the remaining lives.
-        remainingLives = 10;
+        remainingLives = 3;
 
-        state = State::InProgress;
+        state = State::Paused;
         manager.clear();
 
         for (int iX{ 0 }; iX < brkCountX; ++iX)
@@ -565,8 +574,8 @@ public:
                 brick.requiredHits = 1 + ((iX * iY) % 3);
             }
 
-        manager.create<Ball>( wndWidth / 2.f, wndHeight / 2.f );
-        manager.create<Paddle>( wndWidth / 2.f, wndHeight - 50.0f );
+        manager.create<Ball>( gScreenRect.w / 2.f, gScreenRect.h / 2.f );
+        manager.create<Paddle>( gScreenRect.w / 2.f, gScreenRect.h - 50.0f );
     }
 
     void run()
@@ -576,6 +585,7 @@ public:
         bool quit = false;
         while (!quit)
         {
+            gTouchTap = false;
             while (SDL_PollEvent( &e ))
             {
                 //If user closes the window, presses escape
@@ -583,6 +593,26 @@ public:
                     (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE))
                 {
                     quit = true;
+                }
+
+                    //Touch down
+                else if( e.type == SDL_FINGERDOWN )
+                {
+                    gTouchLocation.x = e.tfinger.x * gScreenRect.w;
+                    gTouchLocation.y = e.tfinger.y * gScreenRect.h;
+                    gTouchTap = true;
+                }
+                    //Touch motion
+                else if( e.type == SDL_FINGERMOTION )
+                {
+                    gTouchLocation.x = e.tfinger.x * gScreenRect.w;
+                    gTouchLocation.y = e.tfinger.y * gScreenRect.h;
+                }
+                    //Touch release
+                else if( e.type == SDL_FINGERUP )
+                {
+                    gTouchLocation.x = e.tfinger.x * gScreenRect.w;
+                    gTouchLocation.y = e.tfinger.y * gScreenRect.h;
                 }
             }
 
@@ -597,21 +627,24 @@ public:
             if (gCurrentKeyStates[SDL_SCANCODE_ESCAPE])
                 break;
 
-            if (gCurrentKeyStates[SDL_SCANCODE_P])
+            if (gCurrentKeyStates[SDL_SCANCODE_P] || gTouchTap)
             {
                 if (!pausePressedLastFrame)
                 {
                     if (state == State::Paused)
                         state = State::InProgress;
+#if 0
                     else if (state == State::InProgress)
                         state = State::Paused;
+#endif
                 }
                 pausePressedLastFrame = true;
             }
             else
                 pausePressedLastFrame = false;
 
-            if (gCurrentKeyStates[SDL_SCANCODE_R])
+            if (gCurrentKeyStates[SDL_SCANCODE_R] ||
+                    (state == State::GameOver && gTouchTap) )
                 restart();
 
             // If the game is not in progress, do not draw or update
@@ -637,7 +670,7 @@ public:
                 // new one and remove a life.
                 if (manager.getAll<Ball>().empty())
                 {
-                    manager.create<Ball>( wndWidth / 2.f, wndHeight / 2.f );
+                    manager.create<Ball>( gScreenRect.w / 2.f, gScreenRect.h / 2.f );
                     updateLives = true;
                     --remainingLives;
                 }
